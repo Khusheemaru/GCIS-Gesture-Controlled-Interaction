@@ -24,7 +24,7 @@ The Gesture-Controlled Interaction System (GCIS) is an advanced solution designe
 Clone the repository:
 
 ```bash
-git clone https://github.com/Khusheemaru/GCIS-Gesture-Controlled-Interaction
+git clone https://github.com/Khusheemaru/GCIS-Gesture-Controlled-Interaction.git
 cd GCIS
 
 ```
