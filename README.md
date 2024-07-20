@@ -49,6 +49,6 @@ Control the cursor:
 - Move your index finger to move the cursor.
 - Touch the thumb tip with the index finger tip to click.
 - Touch the thumb tip with the middle finger tip to drag.
-Exit:
+- Exit:
 
 Press 'q' to exit the program.
