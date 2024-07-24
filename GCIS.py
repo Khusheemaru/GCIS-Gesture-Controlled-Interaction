@@ -1,97 +1,95 @@
-import mediapipe as mp
 import cv2
 import numpy as np
-from mediapipe.framework.formats import landmark_pb2
-import time
-import win32api
+import mediapipe as mp
 import pyautogui
+import win32api
 
-#used to draw lines and dots on hand
+# Initialize MediaPipe hands module and drawing utilities
 mp_drawing = mp.solutions.drawing_utils
-
-#used to get all info about hand co-ordinates
 mp_hands = mp.solutions.hands
 
-#take input from webcam using opencv
-video = cv2.VideoCapture(0)
+class HandGestureControl:
+    CLICK_THRESHOLD = 30
+    DRAG_THRESHOLD = 30
 
-#sensitivity of detection and tracking
-with mp_hands.Hands(min_detection_confidence = 0.8,min_tracking_confidence = 0.5) as hands:
-    is_dragging = False
-    
-    while video.isOpened():
-        _,frame = video.read() #read method to read data first is signal and second is frame
+    def __init__(self):
+        self.hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.5)
+        self.is_dragging = False
+        self.video = cv2.VideoCapture(0)
 
-        #opencv takes input in bgr format, mediapipe in rgb
-        image = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-        image = cv2.flip(image,1)
+    def __del__(self):
+        self.video.release()
+        cv2.destroyAllWindows()
 
-        image_height,image_width,_ = image.shape
+    def draw_hand_landmarks(self, image, hand_landmarks):
+        mp_drawing.draw_landmarks(
+            image,
+            hand_landmarks,
+            mp_hands.HAND_CONNECTIONS,
+            mp_drawing.DrawingSpec(color=(250, 44, 250), thickness=2, circle_radius=2)
+        )
 
-        #get hand co-ordinates
-        results = hands.process(image)
+    def get_landmark_coordinates(self, hand_landmarks, landmark, image_width, image_height):
+        normalized_landmark = hand_landmarks.landmark[landmark]
+        return mp_drawing._normalized_to_pixel_coordinates(normalized_landmark.x, normalized_landmark.y, image_width, image_height)
 
+    def handle_gestures(self, index_finger_tip, thumb_tip, middle_finger_tip, image_width, image_height):
+        # Scale cursor position to screen size
+        screen_width, screen_height = pyautogui.size()
+        cursor_x = int(index_finger_tip[0] * screen_width / image_width)
+        cursor_y = int(index_finger_tip[1] * screen_height / image_height)
+        
+        win32api.SetCursorPos((cursor_x, cursor_y))
+        
+        click_distance = np.sqrt((index_finger_tip[0] - thumb_tip[0]) ** 2 + (index_finger_tip[1] - thumb_tip[1]) ** 2)
+        slide_distance = np.sqrt((thumb_tip[0] - middle_finger_tip[0]) ** 2 + (thumb_tip[1] - middle_finger_tip[1]) ** 2)
+        
+        if click_distance < self.CLICK_THRESHOLD:
+            pyautogui.click(button='left')
+        
+        if slide_distance < self.DRAG_THRESHOLD and not self.is_dragging:
+            pyautogui.mouseDown(button='left')
+            self.is_dragging = True
+        elif slide_distance >= self.DRAG_THRESHOLD and self.is_dragging:
+            pyautogui.mouseUp(button='left')
+            self.is_dragging = False
+
+    def process_frame(self, frame):
+        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = cv2.flip(image, 1)
+        image_height, image_width, _ = image.shape
+        results = self.hands.process(image)
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        return image, image_width, image_height, results
 
-        if results.multi_hand_landmarks:
-            for num, hand in enumerate(results.multi_hand_landmarks):
-                mp_drawing.draw_landmarks(
-                    image,
-                    hand,
-                    mp_hands.HAND_CONNECTIONS,
-                    mp_drawing.DrawingSpec(color=(250, 44, 250), thickness=2, circle_radius=2)
-                )
+    def run(self):
+        while self.video.isOpened():
+            success, frame = self.video.read()
+            if not success:
+                print("Ignoring empty camera frame.")
+                continue
 
-            for hand_landmarks in results.multi_hand_landmarks:
-                for point in mp_hands.HandLandmark:
-                    normalized_landmark = hand_landmarks.landmark[point]
-                    pixel_coordinates_landmark = mp_drawing._normalized_to_pixel_coordinates(
-                        normalized_landmark.x, normalized_landmark.y, image_width, image_height
-                    )
+            image, image_width, image_height, results = self.process_frame(frame)
 
-                    if point == mp_hands.HandLandmark.INDEX_FINGER_TIP:
-                        try:
-                            cv2.circle(image, (pixel_coordinates_landmark[0], pixel_coordinates_landmark[1]), 25, (0, 200, 0), 5)
-                            index_finger_tip_x = pixel_coordinates_landmark[0]
-                            index_finger_tip_y = pixel_coordinates_landmark[1]
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    self.draw_hand_landmarks(image, hand_landmarks)
 
-                            # Scale cursor position to screen size
-                            screen_width, screen_height = pyautogui.size()
-                            cursor_x = int(index_finger_tip_x * screen_width / image_width)
-                            cursor_y = int(index_finger_tip_y * screen_height / image_height)
+                    try:
+                        index_finger_tip = self.get_landmark_coordinates(hand_landmarks, mp_hands.HandLandmark.INDEX_FINGER_TIP, image_width, image_height)
+                        thumb_tip = self.get_landmark_coordinates(hand_landmarks, mp_hands.HandLandmark.THUMB_TIP, image_width, image_height)
+                        middle_finger_tip = self.get_landmark_coordinates(hand_landmarks, mp_hands.HandLandmark.MIDDLE_FINGER_TIP, image_width, image_height)
 
-                            win32api.SetCursorPos((cursor_x, cursor_y))
+                        if index_finger_tip and thumb_tip and middle_finger_tip:
+                            self.handle_gestures(index_finger_tip, thumb_tip, middle_finger_tip, image_width, image_height)
+                    
+                    except Exception as e:
+                        print(f"Error processing hand landmarks: {e}")
 
-                            # Detect proximity to thumb tip for click
-                            thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
-                            thumb_tip_x, thumb_tip_y = int(thumb_tip.x * image_width), int(thumb_tip.y * image_height)
-                            click_distance = np.sqrt((index_finger_tip_x - thumb_tip_x) ** 2 + (index_finger_tip_y - thumb_tip_y) ** 2)
+            cv2.imshow('Hand Gesture Control', image)
+            if cv2.waitKey(10) & 0xFF == ord('q'):
+                break
 
-                            # Detect proximity to middle finger tip for slide
-                            middle_finger_tip = hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
-                            middle_finger_tip_x, middle_finger_tip_y = int(middle_finger_tip.x * image_width), int(middle_finger_tip.y * image_height)
-                            slide_distance = np.sqrt((thumb_tip_x - middle_finger_tip_x) ** 2 + (thumb_tip_y - middle_finger_tip_y) ** 2)
-
-                            # Click if the distance is below the threshold
-                            if click_distance < 30:  # Threshold value for click
-                                pyautogui.click(button='left')
-
-                            # Start drag if thumb and middle finger tips are close
-                            if slide_distance < 30 and not is_dragging:  # Threshold value for slide
-                                pyautogui.mouseDown(button='left')
-                                is_dragging = True
-
-                            # End drag if thumb and middle finger tips are not close
-                            if slide_distance >= 30 and is_dragging:
-                                pyautogui.mouseUp(button='left')
-                                is_dragging = False
-
-                        except Exception as e:
-                            print(f"Error: {e}")
-
-        cv2.imshow('game', image)
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-            break
-
-video.release()
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    control = HandGestureControl()
+    control.run()
